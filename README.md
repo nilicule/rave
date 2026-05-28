@@ -1,4 +1,4 @@
-# raveWorld
+# rave.world
 
 A tiny web-based, massively-multiplayer online rave. Three.js in the browser, FastAPI WebSockets on the server, no build step.
 
