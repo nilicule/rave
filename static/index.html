@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>raveWorld</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="/style.css" />
+    <!--
+      Importmap so plain ES modules can `import * as THREE from "three"`.
+      No bundler, no npm. Pinned version for reproducibility.
+    -->
+    <!-- YouTube IFrame Player API. Loaded async; calls onYouTubeIframeAPIReady. -->
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
+</head>
+<body>
+    <!--
+      Two stacked render surfaces, both filling the viewport:
+        - #webgl    : the Three.js WebGLRenderer canvas (3D scene)
+        - #css3d    : the CSS3DRenderer host; the YouTube iframe lives in here
+                      as a CSS3DObject so it tracks the camera in 3D space.
+      The CSS3D layer sits above the WebGL layer in z-order; that's fine since
+      the camera stays behind the player facing the stage.
+    -->
+    <div id="webgl"></div>
+    <div id="css3d"></div>
+
+    <div id="hud">
+        <div id="status">connecting…</div>
+        <div id="hint">click to look · W/S move · A/D turn</div>
+    </div>
+
+    <script type="module" src="/js/main.js"></script>
+</body>
+</html>
