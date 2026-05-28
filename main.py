@@ -70,7 +70,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             # Match on the wire ``type``. New C->S kinds get a new branch here.
             if message.type == MessageType.PLAYER_MOVE:
                 manager.update_player_position(
-                    player.id, message.position, message.rotation
+                    player.id,
+                    message.position,
+                    message.rotation,
+                    message.animation_state,
                 )
             # TODO: handle chat messages here once the protocol gains them.
     except WebSocketDisconnect:

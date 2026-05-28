@@ -7,9 +7,9 @@ Direction conventions (per message class):
     S->C: server emits to one or more clients.
     C->S: client emits to the server.
 
-TODO: add ``animation_state`` and ``chat`` message kinds when those features
-land. The discriminated-union pattern below extends without touching existing
-handlers — add a new class and append it to ``ClientMessage``.
+TODO: add ``chat`` message kinds when that feature lands. The discriminated-
+union pattern below extends without touching existing handlers — add a new
+class and append it to ``ClientMessage``.
 """
 
 from __future__ import annotations
@@ -30,6 +30,20 @@ class MessageType(StrEnum):
     STATE_UPDATE = "state_update"  # S->C, broadcast: periodic full-state snapshot
 
 
+# Closed set of animation states. ``idle`` covers both "standing" and "walking"
+# from the server's point of view — walking has no visual difference at this
+# layer; dancing does. Mirror in static/js/protocol.js DANCE_MOVES.
+AnimationState = Literal[
+    "idle",
+    "fist_pump",
+    "hands_air",
+    "two_step",
+    "big_fish",
+    "disco_point",
+    "running_man",
+]
+
+
 class Vec3(BaseModel):
     x: float
     y: float
@@ -37,16 +51,13 @@ class Vec3(BaseModel):
 
 
 class PlayerState(BaseModel):
-    """A single player's networked state.
-
-    TODO: extend with ``animation_state`` (idle / dancing / etc.) when limb
-    animation lands, and ``chat`` (last-message + timestamp) for the chat slot.
-    """
+    """A single player's networked state."""
 
     id: str
     position: Vec3
     rotation: float  # yaw in radians
     color_seed: int  # client-side palette index for deterministic colors
+    animation_state: AnimationState = "idle"
 
 
 # --- Server -> Client -------------------------------------------------------
@@ -79,6 +90,7 @@ class PlayerMoveMessage(BaseModel):
     type: Literal[MessageType.PLAYER_MOVE] = MessageType.PLAYER_MOVE
     position: Vec3
     rotation: float
+    animation_state: AnimationState = "idle"
 
 
 # Discriminated union for parsing inbound (client->server) messages.

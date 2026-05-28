@@ -7,8 +7,10 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { createAvatar } from './avatar.js';
-import { getMovementIntent, consumeMouseDelta } from './input.js';
+import { getMovementIntent, consumeMouseDelta, consumeDanceCycle } from './input.js';
 import { updateWalkAnimation } from './walkAnimation.js';
+import { updateDanceAnimation } from './danceAnimation.js';
+import { DANCE_MOVES } from './protocol.js';
 
 // Tunables. Kept here (not in CONFIG) because they're feel-of-controls knobs
 // that I expect to fiddle with often during development.
@@ -48,12 +50,19 @@ export class LocalPlayer {
 
         this._smoothCameraPos = new THREE.Vector3();
         this._smoothLookAt = new THREE.Vector3();
+        this._currentMoveIndex = 0;
         this._snapCameraToAvatar();
     }
 
     update(dt) {
         const mouse = consumeMouseDelta();
         const intent = getMovementIntent();
+
+        const cycle = consumeDanceCycle();
+        const N = DANCE_MOVES.length;
+        this._currentMoveIndex = (
+            (this._currentMoveIndex + cycle.forwardPresses - cycle.backPresses) % N + N
+        ) % N;
 
         // --- turn: mouse-X and A/D both feed character yaw ---
         // Three.js rotation.y follows the right-hand rule around +Y, so a
@@ -79,7 +88,10 @@ export class LocalPlayer {
                 Math.cos(yaw) * intent.forward * CONFIG.MOVEMENT_SPEED * dt;
         }
 
+        if (intent.forward !== 0) this._currentMoveIndex = 0; // walk cancels dance
+
         updateWalkAnimation(this.avatar, intent.forward * CONFIG.MOVEMENT_SPEED, dt);
+        updateDanceAnimation(this.avatar, DANCE_MOVES[this._currentMoveIndex]);
 
         this._followCamera(dt);
 
@@ -116,6 +128,7 @@ export class LocalPlayer {
                 z: this.avatar.position.z,
             },
             rotation: this.avatar.rotation.y,
+            animation_state: DANCE_MOVES[this._currentMoveIndex],
         };
     }
 

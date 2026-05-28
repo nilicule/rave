@@ -67,6 +67,7 @@ export class Network {
             type: MessageType.PLAYER_MOVE,
             position: snap.position,
             rotation: snap.rotation,
+            animation_state: snap.animation_state || 'idle',
         }));
     }
 

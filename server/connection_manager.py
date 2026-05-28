@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from .player import Player
 from .protocol import (
+    AnimationState,
     JoinMessage,
     LeaveMessage,
     StateUpdateMessage,
@@ -82,7 +83,11 @@ class ConnectionManager:
     # --- mutations from inbound messages -----------------------------------
 
     def update_player_position(
-        self, player_id: str, position: Vec3, rotation: float
+        self,
+        player_id: str,
+        position: Vec3,
+        rotation: float,
+        animation_state: AnimationState,
     ) -> None:
         """Apply a PLAYER_MOVE update. No-op if the player has vanished."""
         player = self._players.get(player_id)
@@ -90,6 +95,7 @@ class ConnectionManager:
             return
         player.position = position
         player.rotation = rotation
+        player.animation_state = animation_state
 
     # --- broadcast loop ----------------------------------------------------
 

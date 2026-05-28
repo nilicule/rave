@@ -20,6 +20,9 @@ const KEY_MAP = {
     ArrowRight: 'turnRight',
 };
 
+let tPresses = 0;
+let yPresses = 0;
+
 let mouseDx = 0;
 let mouseDy = 0;
 let pointerLocked = false;
@@ -36,7 +39,11 @@ export function installInput(lockTarget) {
         if (action) {
             state[action] = true;
             if (e.code.startsWith('Arrow')) e.preventDefault();
+            return;
         }
+        if (e.repeat) return;
+        if (e.code === 'KeyT') tPresses++;
+        else if (e.code === 'KeyY') yPresses++;
     });
     window.addEventListener('keyup', (e) => {
         const action = KEY_MAP[e.code];
@@ -45,6 +52,8 @@ export function installInput(lockTarget) {
     // Drop all held keys on blur so alt-tab mid-press doesn't strand a key.
     window.addEventListener('blur', () => {
         for (const k of Object.keys(state)) state[k] = false;
+        tPresses = 0;
+        yPresses = 0;
     });
 
     // Click anywhere on the canvas to engage mouselook. Esc releases.
@@ -97,4 +106,16 @@ export function consumeMouseDelta() {
     mouseDx = 0;
     mouseDy = 0;
     return { dx, dy };
+}
+
+/**
+ * Read and reset T/Y key-press counts since the last call. Returns raw press
+ * counts so multiple presses in one frame can each advance the cycle.
+ */
+export function consumeDanceCycle() {
+    const forwardPresses = tPresses;
+    const backPresses = yPresses;
+    tPresses = 0;
+    yPresses = 0;
+    return { forwardPresses, backPresses };
 }

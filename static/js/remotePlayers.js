@@ -9,6 +9,7 @@
 import { CONFIG } from './config.js';
 import { createAvatar } from './avatar.js';
 import { updateWalkAnimation } from './walkAnimation.js';
+import { updateDanceAnimation } from './danceAnimation.js';
 
 const MAX_BUFFER = 8;
 
@@ -26,11 +27,12 @@ class RemoteAvatar {
         this.avatar.rotation.y = state.rotation;
         scene.add(this.avatar);
 
-        // Ring buffer of {time, position, rotation}.
+        // Ring buffer of {time, position, rotation, animation_state}.
         this.buffer = [{
             time: performance.now(),
             position: { ...state.position },
             rotation: state.rotation,
+            animation_state: state.animation_state || 'idle',
         }];
     }
 
@@ -39,6 +41,7 @@ class RemoteAvatar {
             time: now,
             position: { ...state.position },
             rotation: state.rotation,
+            animation_state: state.animation_state || 'idle',
         });
         if (this.buffer.length > MAX_BUFFER) this.buffer.shift();
     }
@@ -47,11 +50,13 @@ class RemoteAvatar {
         const target = renderTime - CONFIG.INTERP_DELAY_MS;
         const buf = this.buffer;
         let signedSpeed = 0;
+        let moveId = 'idle';
 
         if (buf.length === 1 || target <= buf[0].time) {
             const s = buf[0];
             this.avatar.position.set(s.position.x, s.position.y, s.position.z);
             this.avatar.rotation.y = s.rotation;
+            moveId = s.animation_state;
         } else {
             let bracketed = false;
             for (let i = buf.length - 1; i >= 1; i--) {
@@ -77,6 +82,11 @@ class RemoteAvatar {
                     const proj = vx * Math.sin(yaw) + vz * Math.cos(yaw);
                     if (Math.abs(proj) >= DEADBAND) signedSpeed = proj;
 
+                    // Dance state is a discrete enum — no interpolation; use
+                    // the newer (b) sample so a change reaches the visuals
+                    // the moment the server sends the new state.
+                    moveId = b.animation_state;
+
                     bracketed = true;
                     break;
                 }
@@ -85,10 +95,12 @@ class RemoteAvatar {
                 const s = buf[buf.length - 1];
                 this.avatar.position.set(s.position.x, s.position.y, s.position.z);
                 this.avatar.rotation.y = s.rotation;
+                moveId = s.animation_state;
             }
         }
 
         updateWalkAnimation(this.avatar, signedSpeed, dt);
+        updateDanceAnimation(this.avatar, moveId);
     }
 
     dispose(scene) {
