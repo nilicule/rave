@@ -65,38 +65,56 @@ export function createAvatar(colorSeed) {
     head.position.y = 2.3;
     group.add(head);
 
-    // Arms (pivot from shoulder so future code can rotate at the shoulder joint)
-    const armGeo = new THREE.BoxGeometry(0.22, 0.9, 0.22);
-    armGeo.translate(0, -0.45, 0); // pivot at top of arm
-    const leftArmPivot = new THREE.Group();
-    leftArmPivot.position.set(-0.51, 2.0, 0);
-    leftArmPivot.add(new THREE.Mesh(armGeo, shirtMat));
-    group.add(leftArmPivot);
+    // Arms: shoulder pivot → upper arm + elbow pivot → forearm.
+    // Hip/shoulder rotations swing the whole limb; elbow/knee rotations bend it.
+    const armSegGeo = new THREE.BoxGeometry(0.22, 0.45, 0.22);
+    armSegGeo.translate(0, -0.225, 0); // pivot at top of each segment
 
-    const rightArmPivot = new THREE.Group();
-    rightArmPivot.position.set(0.51, 2.0, 0);
-    rightArmPivot.add(new THREE.Mesh(armGeo, shirtMat));
-    group.add(rightArmPivot);
+    function buildArm(xPos) {
+        const shoulder = new THREE.Group();
+        shoulder.position.set(xPos, 2.0, 0);
+        shoulder.add(new THREE.Mesh(armSegGeo, shirtMat));   // upper arm
+        const elbow = new THREE.Group();
+        elbow.position.set(0, -0.45, 0);
+        elbow.add(new THREE.Mesh(armSegGeo, shirtMat));      // forearm
+        shoulder.add(elbow);
+        return { shoulder, elbow };
+    }
 
-    // Legs (pivot from hip)
-    const legGeo = new THREE.BoxGeometry(0.3, 1.0, 0.3);
-    legGeo.translate(0, -0.5, 0); // pivot at top of leg
-    const leftLegPivot = new THREE.Group();
-    leftLegPivot.position.set(-0.22, 1.0, 0);
-    leftLegPivot.add(new THREE.Mesh(legGeo, pantsMat));
-    group.add(leftLegPivot);
+    const leftArmJoints = buildArm(-0.51);
+    const rightArmJoints = buildArm(0.51);
+    group.add(leftArmJoints.shoulder);
+    group.add(rightArmJoints.shoulder);
 
-    const rightLegPivot = new THREE.Group();
-    rightLegPivot.position.set(0.22, 1.0, 0);
-    rightLegPivot.add(new THREE.Mesh(legGeo, pantsMat));
-    group.add(rightLegPivot);
+    // Legs: hip pivot → thigh + knee pivot → shin.
+    const legSegGeo = new THREE.BoxGeometry(0.3, 0.5, 0.3);
+    legSegGeo.translate(0, -0.25, 0);
 
-    // TODO (dancing): drive these pivot rotations from animation state.
+    function buildLeg(xPos) {
+        const hip = new THREE.Group();
+        hip.position.set(xPos, 1.0, 0);
+        hip.add(new THREE.Mesh(legSegGeo, pantsMat));         // thigh
+        const knee = new THREE.Group();
+        knee.position.set(0, -0.5, 0);
+        knee.add(new THREE.Mesh(legSegGeo, pantsMat));        // shin
+        hip.add(knee);
+        return { hip, knee };
+    }
+
+    const leftLegJoints = buildLeg(-0.22);
+    const rightLegJoints = buildLeg(0.22);
+    group.add(leftLegJoints.hip);
+    group.add(rightLegJoints.hip);
+
     group.userData.limbs = {
-        leftArm: leftArmPivot,
-        rightArm: rightArmPivot,
-        leftLeg: leftLegPivot,
-        rightLeg: rightLegPivot,
+        leftArm: leftArmJoints.shoulder,
+        rightArm: rightArmJoints.shoulder,
+        leftLeg: leftLegJoints.hip,
+        rightLeg: rightLegJoints.hip,
+        leftElbow: leftArmJoints.elbow,
+        rightElbow: rightArmJoints.elbow,
+        leftKnee: leftLegJoints.knee,
+        rightKnee: rightLegJoints.knee,
         head,
         torso,
     };
