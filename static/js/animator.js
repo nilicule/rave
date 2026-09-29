@@ -52,7 +52,9 @@ export function updateAnimator(avatar, { signedSpeed, moveId, dt }) {
     if (!s) s = avatar.userData.anim = initState(avatar);
     dt = Math.min(Math.max(dt, 0), MAX_DT);
 
-    const nowS = performance.now() / 1000;
+    // Wall-clock (epoch) time, not time since page load, so every client
+    // shares the same beat phase.
+    const nowS = (performance.timeOrigin + performance.now()) / 1000;
     const beats = nowS * BPM_HZ + s.style.timing;
 
     // --- walk intensity + gait phase ---
