@@ -23,6 +23,10 @@ const SKIN_PALETTE = [
 ];
 const SHOE_PALETTE = [0xffffff, 0x111111, 0xff3366, 0x00d9ff, 0xffd400];
 const ACCESSORIES = ['none', 'cap', 'headband'];
+// Accessories sit above the eyes (head-local y = 0.04) so they never hide them.
+const CAP_Y = 0.1;
+const HEADBAND_Y = 0.13;
+const HEAD_SCALE = [0.9, 1, 0.95];
 
 // Rig proportions (world units). Total height ≈ 2.55.
 export const DIMS = Object.freeze({
@@ -31,7 +35,7 @@ export const DIMS = Object.freeze({
     thighLen: 0.5,
     hipOffsetX: 0.15,      // hip joints either side of the pelvis centre
     hipDropY: 0.06,        // hip joints below the pelvis pivot
-    pelvisRestY: 1.13,     // leaves a slight knee bend when standing
+    pelvisRestY: 1.15,     // leaves a slight knee bend (~16°) when standing
     shoulderX: 0.3,
     upperArmLen: 0.36,
     forearmLen: 0.34,
@@ -67,7 +71,9 @@ function sharedGeometries() {
         thigh: limbGeo(0.12, DIMS.thighLen),
         shin: limbGeo(0.1, DIMS.shinLen),
         foot: new THREE.CapsuleGeometry(0.085, 0.16, 4, 10).rotateX(Math.PI / 2),
-        capDome: new THREE.SphereGeometry(0.265, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+        // Spherical cap hugging the head from y = CAP_Y up (not a full
+        // hemisphere, which would stand proud of the head once raised).
+        capDome: new THREE.SphereGeometry(0.265, 20, 10, 0, Math.PI * 2, 0, Math.acos(CAP_Y / 0.265)),
         capBrim: new THREE.CylinderGeometry(0.2, 0.2, 0.025, 20),
         headband: new THREE.TorusGeometry(0.24, 0.035, 8, 24).rotateX(Math.PI / 2),
     };
@@ -122,14 +128,18 @@ export function createAvatar(colorSeed) {
     mesh(neck, G.neck, skinMat, 0, 0.08, 0);
 
     const head = pivot(neck, 0, 0.3, 0);
-    mesh(head, G.head, skinMat, 0, 0, 0, 0.9, 1, 0.95);
+    mesh(head, G.head, skinMat, 0, 0, 0, ...HEAD_SCALE);
     mesh(head, G.eye, eyeMat, 0.08, 0.04, 0.22);
     mesh(head, G.eye, eyeMat, -0.08, 0.04, 0.22);
     if (accessory === 'cap') {
-        mesh(head, G.capDome, accentMat, 0, 0.02, 0);
-        mesh(head, G.capBrim, accentMat, 0, 0.03, 0.17, 1, 1, 0.9);
+        // Dome shares the head's centre and squash so it sits snugly on top.
+        mesh(head, G.capDome, accentMat, 0, 0, 0, ...HEAD_SCALE);
+        // Brim tipped up slightly so it doesn't shade the eyes from a
+        // raised chase camera.
+        mesh(head, G.capBrim, accentMat, 0, CAP_Y, 0.17, 1, 1, 0.9).rotation.x = -0.2;
     } else if (accessory === 'headband') {
-        mesh(head, G.headband, accentMat, 0, 0.06, 0);
+        // Scaled like the head so the band hugs it instead of floating.
+        mesh(head, G.headband, accentMat, 0, HEADBAND_Y, 0, ...HEAD_SCALE);
     }
 
     // side: +1 = left (+X), -1 = right.
