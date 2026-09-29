@@ -1,236 +1,223 @@
-// Dance animations. A shared wall-clock beat phase drives every per-move
-// function so dancers on a client stay in time with each other (and roughly
-// with other clients — wall clocks differ by <1s in typical environments).
-//
-// Composition rule (mirrored in localPlayer.js and remotePlayers.js):
-//   1. updateWalkAnimation runs first.
-//   2. updateDanceAnimation runs second.
-// Walk owns the .x rotations and Y positions; dance owns those plus .z
-// rotations on arms and torso. Walk re-writes its territory every frame
-// (writing 0s when intensity is 0), so dance overwriting on top is safe.
-// When dance transitions from non-idle to idle, this module resets the
-// dance-exclusive axes once so leftover .z rotations don't ghost.
+// Dance poses. Every dance = groove layer (shared whole-body bounce, weight
+// shift and follow-through) + a move layer (arms, footwork, extra body
+// accents). Driven by a shared wall-clock beat so dancers on different
+// clients stay roughly in time. Writes into a Pose (see poses.js); the
+// animator blends and applies it. No Three.js imports.
 
-const BPM_HZ = 128 / 60;   // ~2.13 Hz at 128 BPM techno
+import { resetPose, smoothEase } from './poses.js';
 
-const FIST_PUMP_AMP = 0.4;
-const HANDS_AIR_SWAY = 0.15;
-const HANDS_AIR_LEAN = 0.1;
-const TWO_STEP_LEAN = 0.08;
-const TWO_STEP_LEG_LIFT = 0.3;
-const TWO_STEP_ARM_SWING = 0.15;
-const BIG_FISH_OUT_X = -Math.PI / 2;
-const BIG_FISH_LEFT_Z = Math.PI / 4;
-const BIG_FISH_RIGHT_Z = -Math.PI / 2;
-const DISCO_POINT_HI_X = -Math.PI * 0.7;
-const DISCO_POINT_HI_Z = 0.6;
-const DISCO_POINT_LO_X = -0.5;
-const DISCO_POINT_LO_Z = 0.4;
-const RUNNING_MAN_ARM = 1.0;
-const RUNNING_MAN_LEG = 0.8;
-const RUNNING_MAN_BOB = 0.12;
-const STEP_GROOVE_KNEE = 0.5;    // knee flex during the alternating step
-const RUNNING_MAN_KNEE = 1.2;    // pronounced bend on the high-knee jog
-const FIST_PUMP_ELBOW = 1.2;     // forearm bend on the down-phase of the pump
-const HANDS_AIR_ELBOW = 0.2;     // slight constant bend so arms aren't rigid sticks
-const DISCO_POINT_ELBOW = 0.15;  // slight bend so arms don't look like rifles
+export const BPM_HZ = 128 / 60;   // beats per second at 128 BPM techno
 
 const TWO_PI = Math.PI * 2;
 
-/**
- * easeInOutSine. t in [0, 1]: starts at 0 with zero velocity, ends at 1
- * with zero velocity. The zero-velocity endpoints make pose-boundary
- * direction changes continuous (no sudden flick).
- */
-function smoothEase(t) {
-    return 0.5 - 0.5 * Math.cos(t * Math.PI);
+/** Beat-fraction bounce: 0 on the beat, dips to 1 at a quarter beat, eases back. */
+function bounceCurve(f) {
+    return f < 0.25
+        ? Math.sin((f / 0.25) * Math.PI / 2)
+        : Math.cos(((f - 0.25) / 0.75) * Math.PI / 2);
 }
 
-// Axes only the dance animator writes. Reset on dance->idle transitions and
-// at the start of every dance frame so cycling between moves doesn't leave
-// ghost .z values.
-function resetDanceExclusiveAxes(limbs) {
-    limbs.leftArm.rotation.z = 0;
-    limbs.rightArm.rotation.z = 0;
-    limbs.torso.rotation.z = 0;
-    limbs.leftElbow.rotation.x = 0;
-    limbs.rightElbow.rotation.x = 0;
-    limbs.leftKnee.rotation.x = 0;
-    limbs.rightKnee.rotation.x = 0;
+function frac(v) {
+    return v - Math.floor(v);
 }
 
-/**
- * Baseline rave-step groove for the legs. Alternating foot lift driven by
- * sin(phase). Called from every dance move whose primary motion is in the
- * upper body so the avatar still looks like it's dancing on its feet.
- */
-function addStepGroove(limbs, phase) {
-    const s = Math.sin(phase);
-    limbs.leftLeg.rotation.x  = Math.max(0,  s) * TWO_STEP_LEG_LIFT;
-    limbs.rightLeg.rotation.x = Math.max(0, -s) * TWO_STEP_LEG_LIFT;
-    limbs.leftKnee.rotation.x  = Math.max(0,  s) * STEP_GROOVE_KNEE;
-    limbs.rightKnee.rotation.x = Math.max(0, -s) * STEP_GROOVE_KNEE;
+/** Always-positive modulo, so negative beat clocks index correctly. */
+function mod(v, n) {
+    return ((v % n) + n) % n;
 }
 
-function fistPump(limbs, phase, _beats, _state) {
-    addStepGroove(limbs, phase);
-    const pumpHigh = Math.sin(phase * 2);
-    limbs.rightArm.rotation.x = -Math.PI + pumpHigh * FIST_PUMP_AMP;
-    limbs.rightElbow.rotation.x = Math.max(0, -pumpHigh) * FIST_PUMP_ELBOW;
+function groove(pose, beats, style) {
+    const en = style.energy;
+    const f = frac(beats);
+    const bar = Math.sin(Math.PI * beats);          // 2-beat weight shift
+
+    // Knee-driven bounce: IK turns the pelvis drop into knee bend.
+    pose.pelvis.y = -0.07 * en * bounceCurve(f);
+    // Weight over the left foot, then the right; loaded hip rises.
+    pose.pelvis.x = 0.06 * en * bar;
+    pose.pelvis.rz = 0.06 * en * bar;
+    pose.pelvis.ry = 0.05 * en * bar;
+    pose.spine.rz = -0.08 * en * bar;               // counter-tilt
+    pose.chest.rz = -0.03 * en * bar;
+    // Follow-through: chest and head lag the pelvis bounce.
+    pose.chest.rx = 0.05 * en * bounceCurve(frac(f - 0.12));
+    pose.neck.rx = 0.12 * en * bounceCurve(frac(f - 0.2));
+    // Slightly wider dance stance.
+    pose.lFoot.x = 0.05;
+    pose.rFoot.x = 0.05;
+    // Loose arms that ride the bounce.
+    const armBob = 0.1 * bounceCurve(frac(f - 0.1));
+    for (const arm of [pose.lArm, pose.rArm]) {
+        arm.sx = -0.15 - armBob;
+        arm.sz = 0.15;
+        arm.e = 0.5 + armBob;
+    }
 }
 
-function handsInAir(limbs, phase, _beats, _state) {
-    addStepGroove(limbs, phase);
-    const s = Math.sin(phase);
-    limbs.leftArm.rotation.x = -Math.PI;
-    limbs.leftArm.rotation.z = HANDS_AIR_SWAY * s;
-    limbs.rightArm.rotation.x = -Math.PI;
-    limbs.rightArm.rotation.z = -HANDS_AIR_SWAY * s;
-    limbs.torso.rotation.z = HANDS_AIR_LEAN * s;
-    limbs.leftElbow.rotation.x  = HANDS_AIR_ELBOW;
-    limbs.rightElbow.rotation.x = HANDS_AIR_ELBOW;
+function dominant(pose, style) {
+    return style.hand === 'l'
+        ? { D: pose.lArm, O: pose.rArm, side: 1 }
+        : { D: pose.rArm, O: pose.lArm, side: -1 };
 }
 
-function twoStep(limbs, phase, _beats, _state) {
-    addStepGroove(limbs, phase);
-    const s = Math.sin(phase);
-    limbs.torso.rotation.z = TWO_STEP_LEAN * s;
-    limbs.leftArm.rotation.x = -s * TWO_STEP_ARM_SWING;
-    limbs.rightArm.rotation.x = s * TWO_STEP_ARM_SWING;
+function fistPump(pose, beats, style) {
+    const f = frac(beats);
+    const strong = mod(Math.floor(beats), 4) === 3;
+    // Double pump on every 4th beat: two punches in one beat.
+    const pf = strong ? frac(f * 2) : f;
+    const u = pf < 0.35 ? smoothEase(pf / 0.35) : 1 - smoothEase((pf - 0.35) / 0.65);
+    const { D, O } = dominant(pose, style);
+    D.sx = -2.6 - 0.4 * u;
+    D.sz = 0.25;
+    D.e = 0.15 + 1.0 * (1 - u);
+    O.sx = -0.3;
+    O.sz = 0.4;
+    O.e = 1.6;                      // hand near the hip, elbow out
+    pose.chest.rx += 0.06 + 0.04 * u;
+    pose.pelvis.y += 0.03 * u;      // chest lifts into the punch
 }
 
-// Per-pose target values for each axis the move writes. Index matches
-// the integer pose number (0 = big fish, 1 = little fish, 2 = cardboard box).
+function handsInAir(pose, beats, _style) {
+    const s = Math.sin(Math.PI * beats);
+    pose.lArm.sx = -2.9;
+    pose.rArm.sx = -2.9;
+    // Both arms sway the same way in body space (sz is mirrored).
+    pose.lArm.sz = 0.35 + 0.15 * s;
+    pose.rArm.sz = 0.35 - 0.15 * s;
+    pose.lArm.e = pose.rArm.e = 0.25;
+    pose.lArm.wz = pose.rArm.wz = 0.3 * Math.sin(TWO_PI * beats);
+    pose.pelvis.x += 0.05 * s;
+    // Body wave rolling up the spine.
+    pose.spine.rx += 0.06 * Math.sin(Math.PI * beats);
+    pose.chest.rx += 0.08 * Math.sin(Math.PI * beats - 0.8);
+    pose.neck.rx += 0.1 * Math.sin(Math.PI * beats - 1.6);
+}
+
+// Step-touch over 4 beats, in body-space X (+X = left):
+//   beat 0→1 left foot steps out, 1→2 right closes,
+//   2→3 right steps back out, 3→4 left closes back to centre.
+function twoStep(pose, beats, _style) {
+    const b4 = mod(beats, 4);
+    const W = 0.2;
+    let lx, rx, liftL = 0, liftR = 0;
+    if (b4 < 1)      { lx = W * smoothEase(b4);           rx = 0; liftL = Math.sin(Math.PI * b4); }
+    else if (b4 < 2) { lx = W; rx = W * smoothEase(b4 - 1);        liftR = Math.sin(Math.PI * (b4 - 1)); }
+    else if (b4 < 3) { lx = W; rx = W * (1 - smoothEase(b4 - 2));  liftR = Math.sin(Math.PI * (b4 - 2)); }
+    else             { lx = W * (1 - smoothEase(b4 - 3)); rx = 0; liftL = Math.sin(Math.PI * (b4 - 3)); }
+
+    pose.lFoot.x += lx;             // left outward = +X
+    pose.rFoot.x -= rx;             // right outward = -X, so +X travel is inward
+    pose.lFoot.y += 0.08 * liftL;
+    pose.rFoot.y += 0.08 * liftR;
+    pose.pelvis.x += (lx + rx) / 2;  // body follows the feet
+
+    const s = Math.sin(Math.PI * beats);
+    pose.chest.ry += 0.15 * s;
+    pose.lArm.sx = 0.35 * s;
+    pose.rArm.sx = -0.35 * s;
+    pose.lArm.e = pose.rArm.e = 0.6;
+}
+
+const RELAXED_ARM = { sx: 0.05, sz: 0.12, e: 0.3 };
+// Pose 0 big fish, 1 little fish, 2 cardboard box.
 const BIG_FISH_POSES = [
-    // Pose 0: big fish — left arm extended out flat with bent forearm
-    { lax: BIG_FISH_OUT_X, laz: BIG_FISH_LEFT_Z,  rax: 0,              raz: 0,
-      lex: 0.3, rex: 0 },
-    // Pose 1: little fish — right arm flat across body with bent forearm
-    { lax: 0,              laz: 0,                rax: BIG_FISH_OUT_X, raz: BIG_FISH_RIGHT_Z,
-      lex: 0, rex: 0.3 },
-    // Pose 2: cardboard box — both forearms angled forward (mimicking holding a box)
-    { lax: BIG_FISH_OUT_X, laz: 0,                rax: BIG_FISH_OUT_X, raz: 0,
-      lex: 0.6, rex: 0.6 },
+    { l: { sx: 0, sz: 1.5, e: 0.3 }, r: RELAXED_ARM, chestRy: 0.2 },
+    { l: RELAXED_ARM, r: { sx: -1.4, sz: -0.2, e: 1.2 }, chestRy: -0.2 },
+    { l: { sx: -1.3, sz: 0.1, e: 0.9 }, r: { sx: -1.3, sz: 0.1, e: 0.9 }, chestRy: 0 },
 ];
 
-function bigFishLittleFishCardboardBox(limbs, phase, beats, _state) {
-    addStepGroove(limbs, phase);
-    // One pose per beat, three-beat loop. Continuously interpolates from
-    // the previous pose to the current pose across the full beat using
-    // easeInOutSine — zero velocity at the boundary so the direction
-    // reversal at each pose change is smooth, never a snap.
-    const cur = Math.floor(beats) % 3;
+function lerpArm(arm, a, b, t) {
+    arm.sx = a.sx + (b.sx - a.sx) * t;
+    arm.sz = a.sz + (b.sz - a.sz) * t;
+    arm.e = a.e + (b.e - a.e) * t;
+}
+
+function bigFish(pose, beats, _style) {
+    const cur = mod(Math.floor(beats), 3);
     const prev = (cur + 2) % 3;
-    const beatFrac = beats % 1;
-    const t = smoothEase(beatFrac);
-
-    const a = BIG_FISH_POSES[prev];
-    const b = BIG_FISH_POSES[cur];
-
-    limbs.leftArm.rotation.x  = a.lax + (b.lax - a.lax) * t;
-    limbs.leftArm.rotation.z  = a.laz + (b.laz - a.laz) * t;
-    limbs.rightArm.rotation.x = a.rax + (b.rax - a.rax) * t;
-    limbs.rightArm.rotation.z = a.raz + (b.raz - a.raz) * t;
-    limbs.leftElbow.rotation.x  = a.lex + (b.lex - a.lex) * t;
-    limbs.rightElbow.rotation.x = a.rex + (b.rex - a.rex) * t;
+    const f = frac(beats);
+    // Snap into each pose in the first quarter beat, then hold.
+    const t = smoothEase(Math.min(1, f / 0.25));
+    const a = BIG_FISH_POSES[prev], b = BIG_FISH_POSES[cur];
+    lerpArm(pose.lArm, a.l, b.l, t);
+    lerpArm(pose.rArm, a.r, b.r, t);
+    pose.chest.ry += a.chestRy + (b.chestRy - a.chestRy) * t;
+    // Body hit on the snap.
+    const hit = t < 1 ? Math.sin(Math.PI * t) : 0;
+    pose.chest.rx += 0.1 * hit;
+    pose.pelvis.y -= 0.03 * hit;
 }
 
-// Per-configuration target values. Index 0 = right arm up-diagonal
-// (sin(phase) >= 0 in the original implementation); index 1 = mirror.
-const DISCO_POINT_CONFIGS = [
-    // Config 0: sin(phase) >= 0 — right arm up-diagonal
-    {
-        lax: DISCO_POINT_LO_X,  laz: -DISCO_POINT_LO_Z,
-        rax: DISCO_POINT_HI_X,  raz: DISCO_POINT_HI_Z,
-        lex: DISCO_POINT_ELBOW, rex: DISCO_POINT_ELBOW,
-    },
-    // Config 1: sin(phase) < 0 — left arm up-diagonal (mirror)
-    {
-        lax: DISCO_POINT_HI_X,  laz: -DISCO_POINT_HI_Z,
-        rax: DISCO_POINT_LO_X,  raz: DISCO_POINT_LO_Z,
-        lex: DISCO_POINT_ELBOW, rex: DISCO_POINT_ELBOW,
-    },
-];
+const POINT_UP = { sx: -2.5, sz: 0.7, e: 0.05 };
+const POINT_CROSS = { sx: -0.6, sz: -0.3, e: 0.3 };
 
-function discoPoint(limbs, phase, beats, _state) {
-    addStepGroove(limbs, phase);
-    // Alternates each half-beat. Continuously interpolates between the
-    // two configurations across each half-beat using easeInOutSine — no
-    // held pose, smooth direction reversal at the boundary.
-    const cur = Math.floor(beats * 2) % 2;
-    const prev = 1 - cur;
-    const halfBeatFrac = (beats * 2) % 1;
-    const t = smoothEase(halfBeatFrac);
-
-    const a = DISCO_POINT_CONFIGS[prev];
-    const b = DISCO_POINT_CONFIGS[cur];
-
-    limbs.leftArm.rotation.x  = a.lax + (b.lax - a.lax) * t;
-    limbs.leftArm.rotation.z  = a.laz + (b.laz - a.laz) * t;
-    limbs.rightArm.rotation.x = a.rax + (b.rax - a.rax) * t;
-    limbs.rightArm.rotation.z = a.raz + (b.raz - a.raz) * t;
-    limbs.leftElbow.rotation.x  = a.lex + (b.lex - a.lex) * t;
-    limbs.rightElbow.rotation.x = a.rex + (b.rex - a.rex) * t;
+function discoPoint(pose, beats, _style) {
+    const cur = mod(Math.floor(beats), 2);  // 0: left points up, 1: right
+    const f = frac(beats);
+    const t = smoothEase(Math.min(1, f / 0.35));
+    // side: +1 when the left arm points up, -1 when the right does.
+    const sidePrev = cur === 0 ? -1 : 1;
+    const sideCur = -sidePrev;
+    const side = sidePrev + (sideCur - sidePrev) * t;
+    const leftUp = (side + 1) / 2;         // 0..1
+    lerpArm(pose.lArm, POINT_CROSS, POINT_UP, leftUp);
+    lerpArm(pose.rArm, POINT_UP, POINT_CROSS, leftUp);
+    // Hip pops out on the pointing side; head follows the finger.
+    pose.pelvis.x += 0.06 * side;
+    pose.pelvis.rz += 0.08 * side;
+    pose.chest.rz -= 0.08 * side;
+    pose.neck.ry += 0.35 * side;
+    pose.neck.rx -= 0.25;
 }
 
-function runningMan(limbs, phase, _beats, state) {
-    const s = Math.sin(phase);
-    limbs.leftArm.rotation.x = s * RUNNING_MAN_ARM;
-    limbs.rightArm.rotation.x = -s * RUNNING_MAN_ARM;
-    limbs.leftLeg.rotation.x = -Math.max(0, s) * RUNNING_MAN_LEG;
-    limbs.rightLeg.rotation.x = -Math.max(0, -s) * RUNNING_MAN_LEG;
-    limbs.leftKnee.rotation.x  = Math.max(0,  s) * RUNNING_MAN_KNEE;
-    limbs.rightKnee.rotation.x = Math.max(0, -s) * RUNNING_MAN_KNEE;
-    limbs.torso.position.y = state.torsoRestY + Math.abs(s) * RUNNING_MAN_BOB;
+// One foot's running-man cycle over 2 beats. p in [0, 2).
+function runningFoot(foot, p) {
+    if (p < 1) {                     // planted: slides back
+        foot.z += 0.15 - 0.4 * p;
+    } else {                         // knee lifts, foot returns forward
+        const u = p - 1;
+        foot.z += -0.25 + 0.4 * smoothEase(u);
+        foot.y += 0.4 * Math.sin(Math.PI * u);
+        foot.pitch += 0.4 * Math.sin(Math.PI * u);
+    }
 }
 
-const DISPATCH = {
+function runningMan(pose, beats, _style) {
+    runningFoot(pose.lFoot, mod(beats, 2));
+    runningFoot(pose.rFoot, mod(beats + 1, 2));
+    pose.pelvis.y -= 0.04;
+    pose.pelvis.x *= 0.3;            // keep the hips fairly level/centred
+    pose.pelvis.rz *= 0.3;
+    pose.chest.rx += 0.1;
+    const s = Math.sin(Math.PI * beats);
+    pose.lArm.sx = -0.3 - 0.7 * s;
+    pose.rArm.sx = -0.3 + 0.7 * s;
+    pose.lArm.e = pose.rArm.e = 1.3;
+}
+
+const MOVES = {
     fist_pump: fistPump,
     hands_air: handsInAir,
     two_step: twoStep,
-    big_fish: bigFishLittleFishCardboardBox,
+    big_fish: bigFish,
     disco_point: discoPoint,
     running_man: runningMan,
 };
 
+export function isDanceMove(moveId) {
+    return Object.hasOwn(MOVES, moveId);
+}
+
 /**
- * Drive a dance pose for the given move id. Must be called every frame —
- * the function tracks transitions out of a dance and resets dance-exclusive
- * axes (.z rotations) on the way to idle so they don't ghost.
- *
- * @param {THREE.Group} avatar - group returned by createAvatar
- * @param {string} moveId - one of DANCE_MOVES; 'idle' (or unknown) returns
- *     to neutral with the transition-aware reset
+ * Write the pose for `moveId` at `beats` into `out`.
+ * @param {string} moveId  one of the MOVES keys
+ * @param {number} beats   beat clock, already including style.timing
+ * @param {object} style   from styleFromSeed
+ * @param {object} out     Pose to overwrite
  */
-export function updateDanceAnimation(avatar, moveId) {
-    const limbs = avatar.userData.limbs;
-    let state = avatar.userData.danceAnim;
-    if (!state) {
-        state = {
-            torsoRestY: limbs.torso.position.y,
-            headRestY: limbs.head.position.y,
-            lastMoveId: 'idle',
-        };
-        avatar.userData.danceAnim = state;
-    }
-
-    const fn = DISPATCH[moveId];
-    if (!fn) {
-        // 'idle' or unknown — reset the dance-only axes once if we just left
-        // a dance, then do nothing. Walk handles .x rotations and Y heights.
-        if (state.lastMoveId !== 'idle') {
-            resetDanceExclusiveAxes(limbs);
-        }
-        state.lastMoveId = 'idle';
-        return;
-    }
-
-    // Every dance frame starts by clearing .z axes so cycling between moves
-    // (some of which don't touch .z) doesn't leave stale rotations.
-    resetDanceExclusiveAxes(limbs);
-
-    const beats = performance.now() / 1000 * BPM_HZ;
-    const phase = (beats % 1) * TWO_PI;
-    fn(limbs, phase, beats, state);
-    state.lastMoveId = moveId;
+export function dancePose(moveId, beats, style, out) {
+    resetPose(out);
+    groove(out, beats, style);
+    MOVES[moveId](out, beats, style);
+    return out;
 }

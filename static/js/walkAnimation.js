@@ -1,73 +1,40 @@
-// Cartoony walk cycle: limbs swing opposite to each other (left leg + right
-// arm forward together), torso/head bob with |sin(phase)| so the body hops
-// twice per stride. Per-avatar state lives on avatar.userData.walkAnim so
-// the same animator drives both the local and remote player paths without
-// any class wrapping the Three.js group.
+// Walk cycle as a Pose. Feet follow elliptical targets (stance: slide back
+// along the floor; swing: lift and return forward), IK bends the knees, arms
+// swing contralaterally, and the pelvis twists and bobs. No Three.js imports.
 
-import { CONFIG } from './config.js';
+import { resetPose } from './poses.js';
 
-const SWING_AMP = 0.7;   // peak limb rotation at full intensity (radians)
-const BOB_AMP = 0.08;    // peak vertical hop of torso/head (world units)
-const CYCLE_HZ = 1.6;    // full gait cycles per second at MOVEMENT_SPEED
-const EASE_RATE = 12;    // exponential smoothing rate toward target intensity
-const KNEE_AMP = 0.6;    // peak knee flex angle (radians) at full intensity
-const ELBOW_AMP = 0.2;   // peak elbow flex on the forward-swinging arm
-const TWO_PI = Math.PI * 2;
+export const WALK_CYCLE_HZ = 2.6;   // full gait cycles/sec at MOVEMENT_SPEED
+const STRIDE = 0.32;                 // foot travel either side of centre
+const LIFT = 0.15;                   // swing-foot lift
+const ARM_SWING = 0.5;
 
 /**
- * Drive a blocky humanoid avatar's limbs through a walk cycle.
- *
- * @param {THREE.Group} avatar - the group returned by createAvatar
- * @param {number} signedSpeed - world units/sec along the avatar's facing.
- *     Positive = forward, negative = backward, ~0 = idle.
- * @param {number} dt - delta seconds since the previous call
+ * @param {number} phase      gait phase in radians
+ * @param {number} direction  +1 walking forward, -1 backward
+ * @param {object} out        Pose to overwrite
  */
-export function updateWalkAnimation(avatar, signedSpeed, dt) {
-    const limbs = avatar.userData.limbs;
-    let state = avatar.userData.walkAnim;
-    if (!state) {
-        state = {
-            phase: 0,
-            intensity: 0,
-            torsoRestY: limbs.torso.position.y,
-            headRestY: limbs.head.position.y,
-        };
-        avatar.userData.walkAnim = state;
+export function walkPose(phase, direction, out) {
+    resetPose(out);
+    const s = Math.sin(phase);
+    const footPhase = [phase, phase + Math.PI];
+    const feet = [out.lFoot, out.rFoot];
+    for (let i = 0; i < 2; i++) {
+        const p = footPhase[i];
+        feet[i].z = STRIDE * Math.sin(p) * direction;
+        // The swing foot is the one moving in the travel direction:
+        // d/dp sin(p) = cos(p) > 0, for either walking direction.
+        const swing = Math.max(0, Math.cos(p));
+        feet[i].y = LIFT * swing;
+        feet[i].pitch = -0.3 * swing * direction;   // toe up while swinging
     }
-
-    const speedFrac = Math.min(Math.abs(signedSpeed) / CONFIG.MOVEMENT_SPEED, 1);
-
-    // Frame-rate independent exponential smoothing — same form used for
-    // the camera follow in localPlayer.js. Prevents a snap when starting
-    // or stopping movement.
-    const alpha = 1 - Math.exp(-dt * EASE_RATE);
-    state.intensity += (speedFrac - state.intensity) * alpha;
-
-    // Phase advance freezes at idle (speedFrac == 0).
-    state.phase += dt * CYCLE_HZ * TWO_PI * speedFrac;
-    if (state.phase > TWO_PI) state.phase -= TWO_PI;
-
-    const sign = signedSpeed >= 0 ? 1 : -1;
-    const swing = Math.sin(state.phase) * SWING_AMP * state.intensity * sign;
-    // |sin| → two bobs per gait cycle (one per footfall).
-    const bob = Math.abs(Math.sin(state.phase)) * BOB_AMP * state.intensity;
-
-    // Phase decomposed for joint flex. Knees flex on the LIFTING leg (always
-    // positive — direction-of-walk doesn't matter for which leg is lifted).
-    // Elbows flex on the FORWARD-swinging arm.
-    const sinPhase = Math.sin(state.phase);
-    const swingNorm = sinPhase * sign;             // [-1, 1] arm-swing direction
-    const leftLegLift  = Math.max(0,  sinPhase);   // [0, 1]
-    const rightLegLift = Math.max(0, -sinPhase);   // [0, 1]
-
-    limbs.leftLeg.rotation.x = swing;
-    limbs.rightLeg.rotation.x = -swing;
-    limbs.leftArm.rotation.x = -swing;        // contralateral
-    limbs.rightArm.rotation.x = swing;
-    limbs.leftKnee.rotation.x  = leftLegLift  * KNEE_AMP * state.intensity;
-    limbs.rightKnee.rotation.x = rightLegLift * KNEE_AMP * state.intensity;
-    limbs.leftElbow.rotation.x  = Math.max(0, -swingNorm) * ELBOW_AMP * state.intensity;
-    limbs.rightElbow.rotation.x = Math.max(0,  swingNorm) * ELBOW_AMP * state.intensity;
-    limbs.torso.position.y = state.torsoRestY + bob;
-    limbs.head.position.y = state.headRestY + bob;
+    // Left leg forward (s > 0) → right arm forward (negative sx).
+    out.lArm.sx = ARM_SWING * s * direction;
+    out.rArm.sx = -ARM_SWING * s * direction;
+    out.lArm.e = out.rArm.e = 0.35;
+    out.pelvis.y = -0.05 + 0.025 * Math.cos(2 * phase);
+    out.pelvis.ry = 0.12 * s * direction;
+    out.chest.ry = -0.1 * s * direction;   // counter-rotate shoulders
+    out.spine.rx = 0.05 * direction;
+    return out;
 }
