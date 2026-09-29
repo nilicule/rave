@@ -4,7 +4,6 @@
 // The result is an offset for the avatar's `body` node; the networked
 // position is never touched.
 
-import { mulberry32, } from './style.js';
 import { smoothEase } from './poses.js';
 
 export const DRIFT_RADIUS = 0.4;     // max offset from the anchor (world units)
@@ -15,9 +14,25 @@ const STEP_SIZE = 0.12;              // max side-step offset per axis
 const STEP_LIFT = 0.07;              // foot lift during a side-step
 const TWO_PI = Math.PI * 2;
 
-function phraseStep(seed, phrase) {
-    const rand = mulberry32((seed ^ Math.imul(phrase, 2654435761)) >>> 0);
-    return { x: (rand() * 2 - 1) * STEP_SIZE, z: (rand() * 2 - 1) * STEP_SIZE };
+// Output of a mulberry32 generator whose state has just advanced to `t`.
+// Same numbers as style.js's mulberry32, without a closure per call.
+function mulberryOut(t) {
+    let r = t;
+    r = Math.imul(r ^ (r >>> 15), r | 1);
+    r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+}
+
+const MULBERRY_INC = 0x6d2b79f5;
+const _prev = { x: 0, z: 0 };   // scratch: no per-frame allocation
+const _cur = { x: 0, z: 0 };
+
+/** Seeded side-step for `phrase`: the first two mulberry32 draws. */
+function phraseStep(seed, phrase, out) {
+    const s = (seed ^ Math.imul(phrase, 2654435761)) >>> 0;
+    out.x = (mulberryOut((s + MULBERRY_INC) >>> 0) * 2 - 1) * STEP_SIZE;
+    out.z = (mulberryOut((s + 2 * MULBERRY_INC) >>> 0) * 2 - 1) * STEP_SIZE;
+    return out;
 }
 
 /**
@@ -38,8 +53,8 @@ export function driftTarget(beats, style, out = {}) {
     // this one over the first beat of the phrase.
     const phrase = Math.floor(beats / PHRASE_BEATS);
     const inPhrase = beats - phrase * PHRASE_BEATS;
-    const prev = phraseStep(seed, phrase - 1);
-    const cur = phraseStep(seed, phrase);
+    const prev = phraseStep(seed, phrase - 1, _prev);
+    const cur = phraseStep(seed, phrase, _cur);
     const t = Math.min(1, inPhrase / STEP_BEATS);
     const e = smoothEase(t);
     x += prev.x + (cur.x - prev.x) * e;

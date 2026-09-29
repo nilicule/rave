@@ -9,6 +9,15 @@ const STRIDE = 0.32;                 // foot travel either side of centre
 const LIFT = 0.15;                   // swing-foot lift
 const ARM_SWING = 0.5;
 
+function walkFoot(foot, p, direction) {
+    foot.z = STRIDE * Math.sin(p) * direction;
+    // The swing foot is the one moving in the travel direction:
+    // d/dp sin(p) = cos(p) > 0, for either walking direction.
+    const swing = Math.max(0, Math.cos(p));
+    foot.y = LIFT * swing;
+    foot.pitch = -0.3 * swing * direction;   // toe up while swinging
+}
+
 /**
  * @param {number} phase      gait phase in radians
  * @param {number} direction  +1 walking forward, -1 backward
@@ -17,17 +26,8 @@ const ARM_SWING = 0.5;
 export function walkPose(phase, direction, out) {
     resetPose(out);
     const s = Math.sin(phase);
-    const footPhase = [phase, phase + Math.PI];
-    const feet = [out.lFoot, out.rFoot];
-    for (let i = 0; i < 2; i++) {
-        const p = footPhase[i];
-        feet[i].z = STRIDE * Math.sin(p) * direction;
-        // The swing foot is the one moving in the travel direction:
-        // d/dp sin(p) = cos(p) > 0, for either walking direction.
-        const swing = Math.max(0, Math.cos(p));
-        feet[i].y = LIFT * swing;
-        feet[i].pitch = -0.3 * swing * direction;   // toe up while swinging
-    }
+    walkFoot(out.lFoot, phase, direction);
+    walkFoot(out.rFoot, phase + Math.PI, direction);
     // Left leg forward (s > 0) → right arm forward (negative sx).
     out.lArm.sx = ARM_SWING * s * direction;
     out.rArm.sx = -ARM_SWING * s * direction;

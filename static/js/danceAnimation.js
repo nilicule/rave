@@ -47,17 +47,22 @@ function groove(pose, beats, style) {
     pose.rFoot.x = 0.05;
     // Loose arms that ride the bounce.
     const armBob = 0.1 * bounceCurve(frac(f - 0.1));
-    for (const arm of [pose.lArm, pose.rArm]) {
-        arm.sx = -0.15 - armBob;
-        arm.sz = 0.15;
-        arm.e = 0.5 + armBob;
-    }
+    looseArm(pose.lArm, armBob);
+    looseArm(pose.rArm, armBob);
 }
 
-function dominant(pose, style) {
-    return style.hand === 'l'
-        ? { D: pose.lArm, O: pose.rArm, side: 1 }
-        : { D: pose.rArm, O: pose.lArm, side: -1 };
+function looseArm(arm, bob) {
+    arm.sx = -0.15 - bob;
+    arm.sz = 0.15;
+    arm.e = 0.5 + bob;
+}
+
+/** The style's dominant arm, and the other one (no per-frame allocation). */
+function dominantArm(pose, style) {
+    return style.hand === 'l' ? pose.lArm : pose.rArm;
+}
+function otherArm(pose, style) {
+    return style.hand === 'l' ? pose.rArm : pose.lArm;
 }
 
 function fistPump(pose, beats, style) {
@@ -66,7 +71,8 @@ function fistPump(pose, beats, style) {
     // Double pump on every 4th beat: two punches in one beat.
     const pf = strong ? frac(f * 2) : f;
     const u = pf < 0.35 ? smoothEase(pf / 0.35) : 1 - smoothEase((pf - 0.35) / 0.65);
-    const { D, O } = dominant(pose, style);
+    const D = dominantArm(pose, style);
+    const O = otherArm(pose, style);
     D.sx = -2.6 - 0.4 * u;
     D.sz = 0.25;
     D.e = 0.15 + 1.0 * (1 - u);

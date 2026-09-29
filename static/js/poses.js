@@ -25,12 +25,15 @@ export const POSE_SHAPE = Object.freeze({
     rFoot: ['x', 'y', 'z', 'pitch'],
 });
 
+// Hoisted so the per-frame helpers below don't allocate an entries array.
+const ENTRIES = Object.entries(POSE_SHAPE);
+
 // Relaxed standing: arms hang slightly away from the body with soft elbows.
 const REST_ARM = { sx: 0.05, sy: 0, sz: 0.1, e: 0.2, wx: 0, wz: 0 };
 
 export function neutralPose() {
     const pose = {};
-    for (const [part, keys] of Object.entries(POSE_SHAPE)) {
+    for (const [part, keys] of ENTRIES) {
         pose[part] = {};
         for (const k of keys) pose[part][k] = 0;
     }
@@ -47,7 +50,7 @@ export function resetPose(out) {
 }
 
 export function copyPose(src, out) {
-    for (const [part, keys] of Object.entries(POSE_SHAPE)) {
+    for (const [part, keys] of ENTRIES) {
         for (const k of keys) out[part][k] = src[part][k];
     }
     return out;
@@ -55,7 +58,7 @@ export function copyPose(src, out) {
 
 /** Component-wise lerp: w=0 -> a, w=1 -> b. `out` may alias a or b. */
 export function blendPose(a, b, w, out) {
-    for (const [part, keys] of Object.entries(POSE_SHAPE)) {
+    for (const [part, keys] of ENTRIES) {
         const pa = a[part], pb = b[part], po = out[part];
         for (const k of keys) po[k] = pa[k] * (1 - w) + pb[k] * w;
     }
