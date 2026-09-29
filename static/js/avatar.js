@@ -1,20 +1,12 @@
-// Blocky humanoid avatar built from box geometries. Limb references are stored
-// on the returned group's userData so future dancing animation code can grab
-// and rotate them without searching the hierarchy.
+// Stylized mannequin avatar: rounded capsule segments on a hierarchical rig
+// (body → pelvis → spine → chest → neck → head, with arms off the chest and
+// legs off the pelvis). animator.js drives the joints via userData.rig.
+//
+// Geometries are shared by every avatar (built once, flagged
+// userData.shared so disposal skips them); materials are per avatar.
 
 import * as THREE from 'three';
-
-// Deterministic pseudo-random from the player's color_seed.
-function mulberry32(seed) {
-    let t = seed >>> 0;
-    return function next() {
-        t = (t + 0x6d2b79f5) >>> 0;
-        let r = t;
-        r = Math.imul(r ^ (r >>> 15), r | 1);
-        r ^= r + Math.imul(r ^ (r >>> 7), r | 61);
-        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-    };
-}
+import { mulberry32 } from './style.js';
 
 // Bright rave palette. Picked from a perceptual high-saturation set.
 const SHIRT_PALETTE = [
@@ -29,18 +21,73 @@ const SKIN_PALETTE = [
     0xffd2a0, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524,
     0xffe0bd, 0xb07a48,
 ];
+const SHOE_PALETTE = [0xffffff, 0x111111, 0xff3366, 0x00d9ff, 0xffd400];
+const ACCESSORIES = ['none', 'cap', 'headband'];
+
+// Rig proportions (world units). Total height ≈ 2.55.
+export const DIMS = Object.freeze({
+    ankleHeight: 0.12,     // ankle joint above the floor
+    shinLen: 0.48,
+    thighLen: 0.5,
+    hipOffsetX: 0.15,      // hip joints either side of the pelvis centre
+    hipDropY: 0.06,        // hip joints below the pelvis pivot
+    pelvisRestY: 1.13,     // leaves a slight knee bend when standing
+    shoulderX: 0.3,
+    upperArmLen: 0.36,
+    forearmLen: 0.34,
+});
 
 function pickColor(rand, palette) {
     return palette[Math.floor(rand() * palette.length)];
 }
 
-function flatMat(color) {
-    return new THREE.MeshStandardMaterial({
-        color,
-        roughness: 0.8,
-        metalness: 0.0,
-        flatShading: true,
-    });
+function mat(color) {
+    return new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.05 });
+}
+
+// A capsule hanging down from its pivot: spans +r above to -(len + r) below,
+// so the rounded caps overlap the joints and hide gaps when they bend.
+function limbGeo(radius, len) {
+    return new THREE.CapsuleGeometry(radius, len, 4, 10).translate(0, -len / 2, 0);
+}
+
+let GEO = null;
+function sharedGeometries() {
+    if (GEO) return GEO;
+    GEO = {
+        pelvis: new THREE.CapsuleGeometry(0.16, 0.22, 4, 12).rotateZ(Math.PI / 2),
+        abdomen: new THREE.CapsuleGeometry(0.17, 0.12, 4, 12),
+        chest: new THREE.CapsuleGeometry(0.22, 0.2, 4, 12),
+        neck: new THREE.CapsuleGeometry(0.07, 0.12, 2, 8),
+        head: new THREE.SphereGeometry(0.25, 20, 14),
+        eye: new THREE.SphereGeometry(0.035, 8, 6),
+        upperArm: limbGeo(0.085, DIMS.upperArmLen),
+        forearm: limbGeo(0.075, DIMS.forearmLen),
+        hand: new THREE.SphereGeometry(0.08, 10, 8),
+        thigh: limbGeo(0.12, DIMS.thighLen),
+        shin: limbGeo(0.1, DIMS.shinLen),
+        foot: new THREE.CapsuleGeometry(0.085, 0.16, 4, 10).rotateX(Math.PI / 2),
+        capDome: new THREE.SphereGeometry(0.265, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2),
+        capBrim: new THREE.CylinderGeometry(0.2, 0.2, 0.025, 20),
+        headband: new THREE.TorusGeometry(0.24, 0.035, 8, 24).rotateX(Math.PI / 2),
+    };
+    for (const g of Object.values(GEO)) g.userData.shared = true;
+    return GEO;
+}
+
+function pivot(parent, x, y, z) {
+    const g = new THREE.Group();
+    g.position.set(x, y, z);
+    parent.add(g);
+    return g;
+}
+
+function mesh(parent, geo, material, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) {
+    const m = new THREE.Mesh(geo, material);
+    m.position.set(x, y, z);
+    m.scale.set(sx, sy, sz);
+    parent.add(m);
+    return m;
 }
 
 /**
@@ -48,76 +95,76 @@ function flatMat(color) {
  * @param {number} colorSeed - integer used as deterministic palette seed.
  */
 export function createAvatar(colorSeed) {
+    const G = sharedGeometries();
     const rand = mulberry32(colorSeed);
-    const shirtMat = flatMat(pickColor(rand, SHIRT_PALETTE));
-    const pantsMat = flatMat(pickColor(rand, PANTS_PALETTE));
-    const skinMat = flatMat(pickColor(rand, SKIN_PALETTE));
+    // Draw order matches the old avatar so players keep their colors.
+    const shirtMat = mat(pickColor(rand, SHIRT_PALETTE));
+    const pantsMat = mat(pickColor(rand, PANTS_PALETTE));
+    const skinMat = mat(pickColor(rand, SKIN_PALETTE));
+    const shoeMat = mat(pickColor(rand, SHOE_PALETTE));
+    const accessory = ACCESSORIES[Math.floor(rand() * ACCESSORIES.length)];
+    const accentMat = mat(pickColor(rand, SHIRT_PALETTE));
+    const eyeMat = mat(0x111111);
 
     const group = new THREE.Group();
+    const body = pivot(group, 0, 0, 0);
 
-    // Torso
-    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.0, 0.4), shirtMat);
-    torso.position.y = 1.5;
-    group.add(torso);
+    const pelvis = pivot(body, 0, DIMS.pelvisRestY, 0);
+    mesh(pelvis, G.pelvis, pantsMat, 0, 0, 0, 1, 1, 0.8);
 
-    // Head
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.55), skinMat);
-    head.position.y = 2.3;
-    group.add(head);
+    const spine = pivot(pelvis, 0, 0.08, 0);
+    mesh(spine, G.abdomen, shirtMat, 0, 0.14, 0, 1.15, 1, 0.8);
 
-    // Arms: shoulder pivot → upper arm + elbow pivot → forearm.
-    // Hip/shoulder rotations swing the whole limb; elbow/knee rotations bend it.
-    const armSegGeo = new THREE.BoxGeometry(0.22, 0.45, 0.22);
-    armSegGeo.translate(0, -0.225, 0); // pivot at top of each segment
+    const chest = pivot(spine, 0, 0.32, 0);
+    mesh(chest, G.chest, shirtMat, 0, 0.2, 0, 1.25, 1, 0.8);
 
-    function buildArm(xPos) {
-        const shoulder = new THREE.Group();
-        shoulder.position.set(xPos, 2.0, 0);
-        shoulder.add(new THREE.Mesh(armSegGeo, shirtMat));   // upper arm
-        const elbow = new THREE.Group();
-        elbow.position.set(0, -0.45, 0);
-        elbow.add(new THREE.Mesh(armSegGeo, shirtMat));      // forearm
-        shoulder.add(elbow);
-        return { shoulder, elbow };
+    const neck = pivot(chest, 0, 0.45, 0);
+    mesh(neck, G.neck, skinMat, 0, 0.08, 0);
+
+    const head = pivot(neck, 0, 0.3, 0);
+    mesh(head, G.head, skinMat, 0, 0, 0, 0.9, 1, 0.95);
+    mesh(head, G.eye, eyeMat, 0.08, 0.04, 0.22);
+    mesh(head, G.eye, eyeMat, -0.08, 0.04, 0.22);
+    if (accessory === 'cap') {
+        mesh(head, G.capDome, accentMat, 0, 0.02, 0);
+        mesh(head, G.capBrim, accentMat, 0, 0.03, 0.17, 1, 1, 0.9);
+    } else if (accessory === 'headband') {
+        mesh(head, G.headband, accentMat, 0, 0.06, 0);
     }
 
-    const leftArmJoints = buildArm(-0.51);
-    const rightArmJoints = buildArm(0.51);
-    group.add(leftArmJoints.shoulder);
-    group.add(rightArmJoints.shoulder);
-
-    // Legs: hip pivot → thigh + knee pivot → shin.
-    const legSegGeo = new THREE.BoxGeometry(0.3, 0.5, 0.3);
-    legSegGeo.translate(0, -0.25, 0);
-
-    function buildLeg(xPos) {
-        const hip = new THREE.Group();
-        hip.position.set(xPos, 1.0, 0);
-        hip.add(new THREE.Mesh(legSegGeo, pantsMat));         // thigh
-        const knee = new THREE.Group();
-        knee.position.set(0, -0.5, 0);
-        knee.add(new THREE.Mesh(legSegGeo, pantsMat));        // shin
-        hip.add(knee);
-        return { hip, knee };
+    // side: +1 = left (+X), -1 = right.
+    function buildArm(side) {
+        const shoulder = pivot(chest, side * DIMS.shoulderX, 0.3, 0);
+        mesh(shoulder, G.upperArm, shirtMat);
+        const elbow = pivot(shoulder, 0, -DIMS.upperArmLen, 0);
+        mesh(elbow, G.forearm, skinMat);
+        const wrist = pivot(elbow, 0, -DIMS.forearmLen, 0);
+        mesh(wrist, G.hand, skinMat, 0, -0.08, 0, 0.9, 1.3, 0.6);
+        return { shoulder, elbow, wrist };
     }
 
-    const leftLegJoints = buildLeg(-0.22);
-    const rightLegJoints = buildLeg(0.22);
-    group.add(leftLegJoints.hip);
-    group.add(rightLegJoints.hip);
+    function buildLeg(side) {
+        const hip = pivot(pelvis, side * DIMS.hipOffsetX, -DIMS.hipDropY, 0);
+        mesh(hip, G.thigh, pantsMat);
+        const knee = pivot(hip, 0, -DIMS.thighLen, 0);
+        mesh(knee, G.shin, pantsMat);
+        const ankle = pivot(knee, 0, -DIMS.shinLen, 0);
+        mesh(ankle, G.foot, shoeMat, 0, -0.06, 0.07, 1.1, 0.7, 1);
+        return { hip, knee, ankle };
+    }
 
-    group.userData.limbs = {
-        leftArm: leftArmJoints.shoulder,
-        rightArm: rightArmJoints.shoulder,
-        leftLeg: leftLegJoints.hip,
-        rightLeg: rightLegJoints.hip,
-        leftElbow: leftArmJoints.elbow,
-        rightElbow: rightArmJoints.elbow,
-        leftKnee: leftLegJoints.knee,
-        rightKnee: rightLegJoints.knee,
-        head,
-        torso,
+    const lArm = buildArm(1), rArm = buildArm(-1);
+    const lLeg = buildLeg(1), rLeg = buildLeg(-1);
+
+    group.userData.rig = {
+        body, pelvis, spine, chest, neck, head,
+        lShoulder: lArm.shoulder, lElbow: lArm.elbow, lWrist: lArm.wrist,
+        rShoulder: rArm.shoulder, rElbow: rArm.elbow, rWrist: rArm.wrist,
+        lHip: lLeg.hip, lKnee: lLeg.knee, lAnkle: lLeg.ankle,
+        rHip: rLeg.hip, rKnee: rLeg.knee, rAnkle: rLeg.ankle,
+        dims: DIMS,
     };
+    group.userData.colorSeed = colorSeed;
 
     return group;
 }

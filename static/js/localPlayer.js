@@ -8,8 +8,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { createAvatar } from './avatar.js';
 import { getMovementIntent, consumeMouseDelta, consumeDanceCycle } from './input.js';
-import { updateWalkAnimation } from './walkAnimation.js';
-import { updateDanceAnimation } from './danceAnimation.js';
+import { updateAnimator } from './animator.js';
 import { DANCE_MOVES } from './protocol.js';
 
 // Tunables. Kept here (not in CONFIG) because they're feel-of-controls knobs
@@ -90,8 +89,11 @@ export class LocalPlayer {
 
         if (intent.forward !== 0) this._currentMoveIndex = 0; // walk cancels dance
 
-        updateWalkAnimation(this.avatar, intent.forward * CONFIG.MOVEMENT_SPEED, dt);
-        updateDanceAnimation(this.avatar, DANCE_MOVES[this._currentMoveIndex]);
+        updateAnimator(this.avatar, {
+            signedSpeed: intent.forward * CONFIG.MOVEMENT_SPEED,
+            moveId: DANCE_MOVES[this._currentMoveIndex],
+            dt,
+        });
 
         this._followCamera(dt);
 

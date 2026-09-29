@@ -8,8 +8,7 @@
 
 import { CONFIG } from './config.js';
 import { createAvatar } from './avatar.js';
-import { updateWalkAnimation } from './walkAnimation.js';
-import { updateDanceAnimation } from './danceAnimation.js';
+import { updateAnimator } from './animator.js';
 
 const MAX_BUFFER = 8;
 
@@ -99,14 +98,13 @@ class RemoteAvatar {
             }
         }
 
-        updateWalkAnimation(this.avatar, signedSpeed, dt);
-        updateDanceAnimation(this.avatar, moveId);
+        updateAnimator(this.avatar, { signedSpeed, moveId, dt });
     }
 
     dispose(scene) {
         scene.remove(this.avatar);
         this.avatar.traverse((obj) => {
-            if (obj.geometry) obj.geometry.dispose();
+            if (obj.geometry && !obj.geometry.userData.shared) obj.geometry.dispose();
             if (obj.material) obj.material.dispose();
         });
     }
