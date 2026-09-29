@@ -14,6 +14,7 @@ import { idlePose } from './idleAnimation.js';
 import { driftTarget } from './drift.js';
 import { styleFromSeed } from './style.js';
 import { solveLeg } from './ik.js';
+import { createFootPlant, plantFeet } from './footPlant.js';
 
 const MAX_DT = 0.1;          // cap so a backgrounded tab doesn't spike poses
 const CROSSFADE_S = 0.3;     // between dance moves / idle
@@ -38,6 +39,8 @@ function initState(avatar) {
         danceWeight: 0,
         drift: { x: 0, z: 0, yaw: 0, liftL: 0, liftR: 0 },
         driftTarget: { x: 0, z: 0, yaw: 0, liftL: 0, liftR: 0 },
+        driftPrev: { x: 0, z: 0, yaw: 0 },
+        footPlant: createFootPlant(),
     };
 }
 
@@ -87,11 +90,16 @@ export function updateAnimator(avatar, { signedSpeed, moveId, dt }) {
     driftTarget(beats, s.style, s.driftTarget);
     const rate = s.walkIntensity > 0.05 ? DRIFT_RETURN_RATE : DRIFT_EASE_RATE;
     const a = 1 - Math.exp(-dt * rate);
+    s.driftPrev.x = s.drift.x;
+    s.driftPrev.z = s.drift.z;
+    s.driftPrev.yaw = s.drift.yaw;
     s.drift.x += (s.driftTarget.x * w - s.drift.x) * a;
     s.drift.z += (s.driftTarget.z * w - s.drift.z) * a;
     s.drift.yaw += (s.driftTarget.yaw * w - s.drift.yaw) * a;
     s.final.lFoot.y += s.driftTarget.liftL * w;
     s.final.rFoot.y += s.driftTarget.liftR * w;
+    // Hold planted feet still in avatar space while the body drifts under them.
+    plantFeet(s.footPlant, s.final, s.driftPrev, s.drift, s.walkIntensity, rig.dims.hipOffsetX, dt);
     rig.body.position.set(s.drift.x, 0, s.drift.z);
     rig.body.rotation.set(0, s.drift.yaw, 0);
 
