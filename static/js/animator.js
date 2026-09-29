@@ -34,6 +34,7 @@ function initState(avatar) {
         final: neutralPose(),
         walkPhase: 0,
         walkIntensity: 0,
+        walkDirection: 1,
         danceWeight: 0,
         drift: { x: 0, z: 0, yaw: 0, liftL: 0, liftR: 0 },
         driftTarget: { x: 0, z: 0, yaw: 0, liftL: 0, liftR: 0 },
@@ -56,6 +57,7 @@ export function updateAnimator(avatar, { signedSpeed, moveId, dt }) {
 
     // --- walk intensity + gait phase ---
     const speedFrac = Math.min(Math.abs(signedSpeed) / CONFIG.MOVEMENT_SPEED, 1);
+    if (speedFrac > 0.01) s.walkDirection = signedSpeed >= 0 ? 1 : -1;
     s.walkIntensity += (speedFrac - s.walkIntensity) * (1 - Math.exp(-dt * WALK_EASE_RATE));
     s.walkPhase = (s.walkPhase + dt * WALK_CYCLE_HZ * TWO_PI * speedFrac) % TWO_PI;
 
@@ -73,7 +75,7 @@ export function updateAnimator(avatar, { signedSpeed, moveId, dt }) {
     blendPose(s.fromPose, s.livePose, smoothEase(s.fade), s.stationary);
 
     // --- walk on top ---
-    walkPose(s.walkPhase, signedSpeed >= 0 ? 1 : -1, s.walk);
+    walkPose(s.walkPhase, s.walkDirection, s.walk);
     blendPose(s.stationary, s.walk, s.walkIntensity, s.final);
 
     // --- drift (visual only; the networked position never moves) ---
