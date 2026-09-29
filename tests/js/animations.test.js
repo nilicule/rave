@@ -64,3 +64,21 @@ test('walk and idle produce finite poses', () => {
         idlePose(p, style, out); assertFinitePose(out, `idle ${p}`);
     }
 });
+
+test('walk pelvis twist and shoulder rotation correspond to foot position', () => {
+    const out = neutralPose();
+    // At phase = π/2, sin(phase) = 1, so s = 1
+    const phase = Math.PI / 2;
+
+    // Forward walk: direction = 1
+    walkPose(phase, 1, out);
+    assert.ok(out.lFoot.z > 0, 'at phase=π/2, direction=1: left foot forward (lFoot.z > 0)');
+    assert.ok(out.pelvis.ry < 0, 'at phase=π/2, direction=1: pelvis rotates back (pelvis.ry < 0)');
+    assert.ok(out.chest.ry > 0, 'at phase=π/2, direction=1: shoulders counter-rotate (chest.ry > 0)');
+
+    // Backward walk: direction = -1
+    walkPose(phase, -1, out);
+    assert.ok(out.lFoot.z < 0, 'at phase=π/2, direction=-1: left foot backward (lFoot.z < 0)');
+    assert.ok(out.pelvis.ry > 0, 'at phase=π/2, direction=-1: pelvis rotates forward (pelvis.ry > 0)');
+    assert.ok(out.chest.ry < 0, 'at phase=π/2, direction=-1: shoulders counter-rotate (chest.ry < 0)');
+});

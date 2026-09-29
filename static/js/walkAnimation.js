@@ -33,8 +33,8 @@ export function walkPose(phase, direction, out) {
     out.rArm.sx = -ARM_SWING * s * direction;
     out.lArm.e = out.rArm.e = 0.35;
     out.pelvis.y = -0.05 + 0.025 * Math.cos(2 * phase);
-    out.pelvis.ry = 0.12 * s * direction;
-    out.chest.ry = -0.1 * s * direction;   // counter-rotate shoulders
+    out.pelvis.ry = -0.12 * s * direction;
+    out.chest.ry = 0.1 * s * direction;   // counter-rotate shoulders
     out.spine.rx = 0.05 * direction;
     return out;
 }
