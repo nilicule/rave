@@ -41,6 +41,7 @@ const PIXELS_PER_UNIT = 100;
 let _player = null;
 let _playerReady = false;
 let _unmuteRequested = false;
+let _consecutiveErrors = 0; // playlist entries skipped in a row via onError
 
 export function createStage(scene, cssScene, cssRenderer) {
     buildStageRig(scene);
@@ -352,6 +353,26 @@ function initPlayer(source, width, height) {
                 // Error codes: 2 invalid param, 5 HTML5 player error,
                 // 100 video not found, 101/150 embed not allowed by uploader.
                 console.error('[stage] YT player error code:', e.data);
+                if (source.kind !== 'playlist') return;
+                // Skip unplayable entries. Cap consecutive skips at the
+                // playlist length so a fully-blocked list doesn't spin forever.
+                const list = e.target.getPlaylist();
+                const limit = list ? list.length : 1;
+                if (++_consecutiveErrors >= limit) {
+                    console.error('[stage] every playlist entry failed; giving up');
+                    return;
+                }
+                // Jump by explicit index: nextVideo() is often a no-op once the
+                // player is in an error state. Small delay because calls made
+                // synchronously inside onError are sometimes ignored too.
+                const idx = e.target.getPlaylistIndex();
+                const next = (idx + 1) % limit;
+                console.warn(`[stage] skipping unplayable entry ${idx} -> ${next} (attempt ${_consecutiveErrors}/${limit})`);
+                setTimeout(() => {
+                    try { e.target.playVideoAt(next); } catch (err) {
+                        console.error('[stage] skip failed:', err);
+                    }
+                }, 500);
             },
             onStateChange: (e) => {
                 const states = {
@@ -359,6 +380,7 @@ function initPlayer(source, width, height) {
                     2: 'paused', 3: 'buffering', 5: 'cued',
                 };
                 console.log('[stage] state:', states[e.data] ?? e.data);
+                if (e.data === YT.PlayerState.PLAYING) _consecutiveErrors = 0;
             },
         },
     };
